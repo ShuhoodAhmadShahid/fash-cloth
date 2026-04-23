@@ -1,0 +1,14 @@
+# Fashion Recommendation System - Requirements
+
+flask==3.0.0
+flask-cors==4.0.0
+torch==2.1.0
+transformers==4.35.0
+pillow==10.1.0
+numpy==1.24.3
+mediapipe==0.10.8
+diffusers==0.24.0
+accelerate==0.25.0
+faiss-cpu==1.7.4
+scipy==1.11.4
+requests==2.31.0
