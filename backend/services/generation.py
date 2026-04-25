@@ -37,10 +37,8 @@ def _get_sd_turbo():
 def _headers() -> dict:
     token = os.environ.get("HF_TOKEN")
     if not token:
-        raise RuntimeError(
-            "HF_TOKEN is not set. "
-            "Get a free token at https://huggingface.co/settings/tokens"
-        )
+        # We don't raise error here, let the caller handle missing token
+        return {}
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -279,6 +277,14 @@ async def generate_outfit_images(
     num_images: int = 1,
 ) -> List[str]:
     person_b64 = base64.b64encode(person_image).decode()
+    # Check for HF Token if local VTON is not available
+    pipeline = _get_vton_pipeline()
+    if not pipeline and not os.environ.get("HF_TOKEN"):
+        print("[WARNING] Local VTON not available and HF_TOKEN not set. Using mock results.")
+        # Return empty list or we can return a message.
+        # Frontend handles empty images gracefully now.
+        return []
+
     results: List[str] = []
 
     async with httpx.AsyncClient() as client:
@@ -288,7 +294,6 @@ async def generate_outfit_images(
 
             try:
                 # 1. Try Local VTON Pipeline (High Quality)
-                pipeline = _get_vton_pipeline()
                 if pipeline:
                     print(f"[DEBUG] Attempting local VTON for {garment}")
                     # A. Generate relevant garment image first

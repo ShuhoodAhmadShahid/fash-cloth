@@ -259,7 +259,7 @@ analyzeBtn.addEventListener('click', async () => {
     analysis = await aRes.json();
 
     // 2 — recommend
-    setStatus('Detecting skin tone…');
+    setStatus('Fetching recommendations…');
     const rRes = await fetch('/recommend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -350,7 +350,12 @@ async function generateImages(a, r) {
         .map(src => `<img src="${src}" alt="You in this outfit" />`)
         .join('');
     } else {
-      genImages.innerHTML = '<p class="gen-error">No images returned from API.</p>';
+      genImages.innerHTML = `
+        <div class="gen-notice">
+          <p>Outfit generation is unavailable without a Hugging Face token or local GPU.</p>
+          <p class="small">However, you can still see your personalized recommendations above!</p>
+        </div>
+      `;
     }
   } catch (err) {
     genStatus.style.display = 'none';
