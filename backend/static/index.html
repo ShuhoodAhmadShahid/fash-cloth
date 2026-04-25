@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fashion AI — Personalised Outfit Recommendations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     CAMERA MODAL  (outside container so it can be truly full-screen)
+════════════════════════════════════════════ -->
+<div class="camera-modal" id="cameraModal" hidden aria-modal="true" role="dialog" aria-label="Camera">
+  <div class="camera-inner">
+
+    <div class="camera-header">
+      <span class="camera-title">&#128247;&nbsp; Take a Photo</span>
+      <div class="camera-header-btns">
+        <button class="camera-ctrl" id="flipBtn" title="Switch camera">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 7H4M4 7l4-4M4 7l4 4M4 17h16M16 13l4 4-4 4"/>
+          </svg>
+          Flip
+        </button>
+        <button class="camera-ctrl camera-ctrl-close" id="cameraClose" title="Close">&#10005;</button>
+      </div>
+    </div>
+
+    <div class="camera-viewfinder">
+      <video id="cameraVideo" autoplay playsinline muted></video>
+      <div class="face-guide" aria-hidden="true"></div>
+      <div class="camera-hint-overlay">Align face with oval</div>
+    </div>
+
+    <canvas id="cameraCanvas" hidden></canvas>
+
+    <div class="camera-footer">
+      <button class="capture-btn" id="captureBtn" title="Take photo" aria-label="Capture photo">
+        <span class="capture-dot"></span>
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MAIN APP
+════════════════════════════════════════════ -->
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="header-pill">&#10024;&nbsp; AI-Powered Fashion</div>
+    <h1>Fashion AI</h1>
+    <p>Upload or take a selfie &mdash; get personalised outfits, colors&nbsp;&amp;&nbsp;style tips tailored just for you</p>
+  </header>
+
+  <main>
+
+    <!-- ── UPLOAD SECTION ─────────────────────────────────── -->
+    <section class="upload-section" id="uploadSection">
+
+      <!-- Step label -->
+      <p class="step-label"><span class="step-num">1</span> Add your photo</p>
+
+      <div class="method-grid" id="methodGrid">
+
+        <div class="method-card" id="methodGallery" tabindex="0" role="button" aria-label="Upload from gallery">
+          <div class="method-icon-bg gallery-bg">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <path d="M21 15l-5-5L5 21"/>
+            </svg>
+          </div>
+          <div class="method-text">
+            <strong>Upload Photo</strong>
+            <span>JPG, PNG, WEBP &middot; drag&nbsp;&amp;&nbsp;drop</span>
+          </div>
+        </div>
+
+        <div class="method-card" id="methodCamera" tabindex="0" role="button" aria-label="Take a photo with camera">
+          <div class="method-icon-bg camera-bg">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+          </div>
+          <div class="method-text">
+            <strong>Take a Photo</strong>
+            <span>Front &amp; back camera supported</span>
+          </div>
+        </div>
+
+      </div>
+
+      <input type="file" id="fileInput" accept="image/*" hidden />
+
+      <!-- Preview -->
+      <div class="preview-wrap" id="previewWrap" hidden>
+        <div class="preview-frame">
+          <img id="previewImg" alt="Your photo" />
+          <div class="preview-check">
+            <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
+              <path fill-rule="evenodd" d="M16.7 5.3a1 1 0 0 1 0 1.4l-8 8a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4L8 12.6l7.3-7.3a1 1 0 0 1 1.4 0z"/>
+            </svg>
+            Photo ready
+          </div>
+        </div>
+        <button class="btn-text" id="changeBtn">&#8592; Use a different photo</button>
+      </div>
+
+      <!-- Step 2 label -->
+      <p class="step-label" id="step2Label" hidden><span class="step-num">2</span> Confirm &amp; analyze</p>
+
+      <button class="btn-primary" id="analyzeBtn" disabled>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        Analyze &amp; Get Recommendations
+      </button>
+
+    </section>
+
+    <!-- ── LOADING SECTION ────────────────────────────────── -->
+    <section class="loading-section" id="loadingSection" hidden>
+      <div class="loading-card">
+        <div class="loading-ring">
+          <div class="loading-ring-inner"></div>
+        </div>
+        <p class="loading-text" id="loadingText">Analyzing face&hellip;</p>
+        <div class="loading-steps">
+          <div class="lstep" id="lstep1">&#128100; Face detection</div>
+          <div class="lstep" id="lstep2">&#127775; Skin &amp; shape</div>
+          <div class="lstep" id="lstep3">&#128247; Recommendations</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── RESULTS SECTION ────────────────────────────────── -->
+    <section class="results-section" id="resultsSection" hidden>
+
+      <!-- Top three cards -->
+      <div class="cards-grid three-col">
+
+        <!-- Profile -->
+        <div class="card">
+          <div class="card-label">
+            <span class="card-icon profile-icon">&#128100;</span>
+            Your Profile
+          </div>
+          <div id="profileItems"></div>
+        </div>
+
+        <!-- Colors -->
+        <div class="card">
+          <div class="card-label">
+            <span class="card-icon color-icon">&#127775;</span>
+            Best Colors
+          </div>
+          <div class="swatches" id="swatches"></div>
+        </div>
+
+        <!-- Outfits -->
+        <div class="card">
+          <div class="card-label">
+            <span class="card-icon outfit-icon">&#128248;</span>
+            Suggested Outfits
+          </div>
+          <div class="tags" id="outfitTags"></div>
+          <div class="accessories-row">
+            <span class="mini-label">&#128081; Accessories</span>
+            <div class="tags sm" id="accessoryTags"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Style tips — full width -->
+      <div class="card card-wide">
+        <div class="card-label">
+          <span class="card-icon tips-icon">&#127775;</span>
+          Style Tips for Your Face Shape
+        </div>
+        <p class="style-desc" id="styleDesc"></p>
+        <ul class="tips-list" id="tipsList"></ul>
+      </div>
+
+      <!-- Generated images — full width -->
+      <div class="card card-wide generated-card">
+        <div class="card-label">
+          <span class="card-icon gen-icon">&#128247;</span>
+          You in These Outfits
+          <span class="badge">AI try-on</span>
+        </div>
+
+        <!-- Loading state (spinner inside) -->
+        <div class="gen-loading" id="genStatus">
+          <div class="gen-spinner"></div>
+          <div>
+            <p class="gen-loading-title">Generating your try-on&hellip;</p>
+            <p class="gen-loading-sub">Usually takes 15&ndash;40 seconds via Hugging Face API</p>
+          </div>
+        </div>
+
+        <!-- Images appear here -->
+        <div class="gen-images" id="genImages"></div>
+      </div>
+
+      <button class="btn-outline center-btn" id="tryAgainBtn">
+        &#8592; Try another photo
+      </button>
+
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

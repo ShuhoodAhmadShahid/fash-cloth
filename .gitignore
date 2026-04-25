@@ -1,8 +1,11 @@
-```
 # Dependencies
 backend/venv/
+venv/
 backend/__pycache__/
 __pycache__/
+
+# Weights
+backend/libs/fashn-vton/weights/
 
 # Logs and temp files
 *.log
@@ -30,4 +33,3 @@ htmlcov/
 .Python
 *.so
 *.egg-info/
-```
