@@ -56,11 +56,13 @@ def _get_vton_pipeline():
             from fashn_vton import TryOnPipeline
             # Path to weights in libs directory
             weights_dir = os.path.join(os.path.dirname(__file__), "..", "libs", "fashn-vton", "weights")
-            if os.path.exists(weights_dir):
-                print(f"[DEBUG] Initializing TryOnPipeline with weights from {weights_dir}")
-                _TRY_ON_PIPELINE = TryOnPipeline(weights_dir=weights_dir)
-            else:
-                print(f"[WARNING] VTON weights not found at {weights_dir}. Local VTON will be disabled.")
+            # Even if directory appears empty in ls, user says it's there.
+            # We will try to initialize it.
+            print(f"[DEBUG] Initializing TryOnPipeline with weights from {weights_dir} on CPU")
+            _TRY_ON_PIPELINE = TryOnPipeline(
+                weights_dir=weights_dir,
+                device="cpu"
+            )
         except Exception as e:
             print(f"[ERROR] Failed to load VTON pipeline: {e}")
     return _TRY_ON_PIPELINE
@@ -254,12 +256,14 @@ async def _vton_local(
     person = Image.open(io.BytesIO(person_image)).convert("RGB")
     garment = Image.open(io.BytesIO(garment_image)).convert("RGB")
 
-    # Run try-on
+    # Run try-on as per user's specific parameters
     result = pipeline(
         person_image=person,
         garment_image=garment,
         category=category,
-        num_timesteps=10
+        num_timesteps=10,
+        height=512,
+        width=384
     )
 
     buf = io.BytesIO()
