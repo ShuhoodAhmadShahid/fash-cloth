@@ -9,14 +9,23 @@ def _get_gender_model():
     if _gender_model is None:
         try:
             from transformers import pipeline, AutoImageProcessor, AutoModelForImageClassification
-            print("[DEBUG] Loading gender model locally...")
-            processor = AutoImageProcessor.from_pretrained("rizvandwiki/gender-classification", local_files_only=True)
-            model = AutoModelForImageClassification.from_pretrained("rizvandwiki/gender-classification", local_files_only=True)
+            model_id = "rizvandwiki/gender-classification"
+            print(f"[DEBUG] Attempting to load gender model: {model_id}")
+
+            # Try to load locally first, then download if allowed
+            try:
+                processor = AutoImageProcessor.from_pretrained(model_id, local_files_only=True)
+                model = AutoModelForImageClassification.from_pretrained(model_id, local_files_only=True)
+            except Exception:
+                print(f"[DEBUG] Local model not found, attempting download for {model_id}...")
+                processor = AutoImageProcessor.from_pretrained(model_id)
+                model = AutoModelForImageClassification.from_pretrained(model_id)
+
             _gender_model = pipeline(
                 "image-classification", 
                 model=model, 
                 image_processor=processor, 
-                device=-1
+                device=-1 # Force CPU
             )
         except Exception as e:
             print(f"[ERROR] Failed to load gender model: {e}")
@@ -29,10 +38,17 @@ def _detect_face_mediapipe(image_np):
         import mediapipe as mp
         mp_fd = mp.solutions.face_detection
         h, w = image_np.shape[:2]
-        with mp_fd.FaceDetection(model_selection=0, min_detection_confidence=0.5) as detector:
+        # model_selection=1 is better for full-body or medium-range photos
+        with mp_fd.FaceDetection(model_selection=1, min_detection_confidence=0.4) as detector:
             results = detector.process(image_np)
         if not results.detections:
+            # Try again with model_selection=0 as fallback
+            with mp_fd.FaceDetection(model_selection=0, min_detection_confidence=0.3) as detector:
+                results = detector.process(image_np)
+
+        if not results or not results.detections:
             return None
+
         det = results.detections[0]
         bb = det.location_data.relative_bounding_box
         x1 = max(0, int(bb.xmin * w))
@@ -153,19 +169,40 @@ def create_clothing_mask(image: Image.Image) -> Image.Image:
 
 
 def analyze_image(image: Image.Image) -> dict:
-    image_resized = image.resize((256, 256), Image.LANCZOS)
+    # Use higher resolution for better detection
+    image_resized = image.resize((512, 512), Image.LANCZOS)
     image_np = np.array(image_resized)
 
     bbox = _detect_face(image_np)
-    if bbox is None:
-        raise ValueError("No face detected. Please upload a clear photo showing your face.")
 
-    pad = 8
-    x1 = max(0, bbox["x1"] - pad)
-    y1 = max(0, bbox["y1"] - pad)
-    x2 = min(image_np.shape[1], bbox["x2"] + pad)
-    y2 = min(image_np.shape[0], bbox["y2"] + pad)
-    face_np = image_np[y1:y2, x1:x2]
+    # Fallback if no face detected: assume centered head/upper body
+    if bbox is None:
+        print("[WARNING] No face detected, using fallback region")
+        h, w = image_np.shape[:2]
+        bbox = {
+            "x1": int(w * 0.3), "y1": int(h * 0.1),
+            "x2": int(w * 0.7), "y2": int(h * 0.4),
+            "width": int(w * 0.4), "height": int(h * 0.3),
+            "ratio": 1.0,
+            "fallback": True
+        }
+
+    x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
+
+    # Crop face with some padding for analysis
+    pad_w = int(bbox["width"] * 0.1)
+    pad_h = int(bbox["height"] * 0.1)
+
+    crop_x1 = max(0, x1 - pad_w)
+    crop_y1 = max(0, y1 - pad_h)
+    crop_x2 = min(image_np.shape[1], x2 + pad_w)
+    crop_y2 = min(image_np.shape[0], y2 + pad_h)
+
+    face_np = image_np[crop_y1:crop_y2, crop_x1:crop_x2]
+    if face_np.size == 0: # Safety check
+        face_np = image_np[int(image_np.shape[0]*0.1):int(image_np.shape[0]*0.4),
+                           int(image_np.shape[1]*0.3):int(image_np.shape[1]*0.7)]
+
     face_pil = Image.fromarray(face_np)
 
     try:
