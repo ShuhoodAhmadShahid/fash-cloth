@@ -43,17 +43,36 @@ const tryAgainBtn   = $('tryAgainBtn');
 
 // ── Color CSS map ───────────────────────────────────────────
 const COLOR_CSS = {
-  'ivory': '#fffff0', 'soft pink': '#ffb6c1', 'lavender': '#e6e6fa',
-  'powder blue': '#b0e0e6', 'mint green': '#98ff98', 'blush rose': '#f4a7b9',
-  'champagne': '#f7e7ce', 'light grey': '#d3d3d3', 'peach': '#ffcba4',
-  'sky blue': '#87ceeb', 'olive': '#6b7c3a', 'terracotta': '#c36a2d',
-  'forest green': '#228b22', 'rust': '#b7410e', 'coral': '#ff7f50',
-  'caramel': '#c68642', 'burgundy': '#800020', 'deep teal': '#008080',
-  'cinnamon': '#d2691e', 'amber': '#ffbf00', 'mustard': '#e3a857',
-  'royal blue': '#4169e1', 'emerald green': '#50c878', 'gold': '#ffd700',
-  'white': '#f5f5f5', 'cobalt': '#0047ab', 'fuchsia': '#ff00ff',
-  'deep orange': '#ff6600', 'wine red': '#722f37', 'cream': '#fffdd0',
-  'navy': '#001f5b', 'beige': '#f5f0e8',
+  // Porcelain
+  'icy blue': '#afeeee', 'silver': '#c0c0c0', 'soft lavender': '#e6e6fa', 'mint': '#98ff98',
+  'cool pink': '#ffb6c1', 'charcoal': '#36454f', 'navy': '#000080', 'emerald green': '#50c878',
+  'white': '#ffffff', 'black': '#000000',
+
+  // Fair
+  'peach': '#ffcba4', 'soft pink': '#ffb6c1', 'baby blue': '#89cff0', 'mint green': '#98ff98',
+  'champagne': '#f7e7ce', 'light grey': '#d3d3d3', 'lavender': '#e6e6fa', 'coral': '#ff7f50',
+  'ivory': '#fffff0', 'rose gold': '#b76e79',
+
+  // Light
+  'sage green': '#8a9a5b', 'dusty rose': '#cca3a3', 'beige': '#f5f5dc', 'periwinkle': '#ccccff',
+  'camel': '#c19a6b', 'olive': '#808000', 'mauve': '#e0b0ff', 'powder blue': '#b0e0e6',
+  'teal': '#008080', 'burgundy': '#800020',
+
+  // Medium
+  'terracotta': '#e2725b', 'forest green': '#228b22', 'rust': '#b7410e', 'caramel': '#af6f09',
+  'deep teal': '#004d4d', 'mustard': '#ffdb58', 'cinnamon': '#d2691e', 'amber': '#ffbf00',
+
+  // Tan
+  'warm brown': '#964b00', 'burnt orange': '#cc5500', 'gold': '#ffd700', 'turquoise': '#40e0d0',
+  'cream': '#fffdd0',
+
+  // Deep
+  'royal blue': '#4169e1', 'plum': '#8e4585', 'magenta': '#ff00ff', 'deep purple': '#36013f',
+  'bright white': '#ffffff', 'yellow': '#ffff00',
+
+  // Ebony
+  'cobalt blue': '#0047ab', 'fuchsia': '#ff00ff', 'canary yellow': '#ffef00', 'tangerine': '#f28500',
+  'electric lime': '#ccff00', 'crimson': '#dc143c',
 };
 
 // ── Upload / Gallery ────────────────────────────────────────

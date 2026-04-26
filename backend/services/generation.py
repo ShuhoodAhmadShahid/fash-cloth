@@ -3,26 +3,52 @@ import asyncio
 import base64
 import httpx
 from typing import List
+from dotenv import load_dotenv
 
-# HF changed their endpoint. Router is the new primary; legacy as fallback.
-_HF_ROUTER = "https://router.huggingface.co/hf-inference/models"
-_HF_LEGACY = "https://api-inference.huggingface.co/models"
+# Point to the .env file in the backend directory
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_env_path = os.path.join(_backend_dir, ".env")
+load_dotenv(_env_path)
+
+
+# HF Inference API endpoint (legacy api-inference.huggingface.co is dead)
+_HF_API_BASE = "https://router.huggingface.co/hf-inference/models"
 
 _MODEL_TXT2IMG = os.environ.get("HF_MODEL", "black-forest-labs/FLUX.1-schnell")
-# Using SD v1.5 Inpainting which is more widely supported on HF serverless
-_MODEL_IMG2IMG = "runwayml/stable-diffusion-v1-5-inpainting"
 
 _TRY_ON_PIPELINE = None
 _SD_TURBO_PIPELINE = None
 
+# ── Hardware detection ──────────────────────────────────────
+def _has_gpu() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+_GPU_AVAILABLE = _has_gpu()
+if not _GPU_AVAILABLE:
+    print("[INFO] No GPU detected — local portrait models disabled to save RAM.")
+    print("[INFO] Local VTON (Try-On) is ENABLED on CPU (Will be very slow).")
+    print("[INFO] Using HF Inference API as fallback for portraits.")
+
+# Fallback models supported on HF Inference API
+_FALLBACK_MODELS = [
+    "black-forest-labs/FLUX.1-dev",
+]
+
+
 def _get_sd_turbo():
+    if not _GPU_AVAILABLE:
+        return None
     global _SD_TURBO_PIPELINE
     if _SD_TURBO_PIPELINE is None:
         try:
             from diffusers import AutoPipelineForText2Image
             import torch
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"[DEBUG] Loading local SD Turbo on {device}...")
+            print(f"[DEBUG] Loading local SD Turbo (Txt2Img) on {device}...")
             _SD_TURBO_PIPELINE = AutoPipelineForText2Image.from_pretrained(
                 "stabilityai/sd-turbo", 
                 torch_dtype=torch.float16 if device == "cuda" else torch.float32,
@@ -34,12 +60,35 @@ def _get_sd_turbo():
     return _SD_TURBO_PIPELINE
 
 
+_INPAINTING_PIPELINE = None
+
+def _get_inpainting_pipeline():
+    if not _GPU_AVAILABLE:
+        return None
+    global _INPAINTING_PIPELINE
+    if _INPAINTING_PIPELINE is None:
+        try:
+            from diffusers import AutoPipelineForInpainting
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[DEBUG] Loading local Inpainting model (SD Turbo) on {device}...")
+            # We use SD Turbo for inpainting as well for speed and local availability
+            _INPAINTING_PIPELINE = AutoPipelineForInpainting.from_pretrained(
+                "stabilityai/sd-turbo",
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                variant="fp16" if device == "cuda" else None,
+                local_files_only=True
+            ).to(device)
+        except Exception as e:
+            print(f"[WARNING] Local Inpainting model not available: {e}")
+    return _INPAINTING_PIPELINE
+
+
 def _headers() -> dict:
     token = os.environ.get("HF_TOKEN")
     if not token:
         raise RuntimeError(
-            "HF_TOKEN is not set. "
-            "Get a free token at https://huggingface.co/settings/tokens"
+            "HF_TOKEN is not set. Please check your .env file in the backend folder."
         )
     return {"Authorization": f"Bearer {token}"}
 
@@ -93,84 +142,16 @@ async def _call(
             wait = float(resp.json().get("estimated_time", 20))
         except Exception:
             wait = 20.0
+        print(f"[DEBUG] Model loading, waiting {wait:.0f}s (attempt {attempt + 1}/4)...")
         await asyncio.sleep(min(wait, 30))
         return await _call(client, url, payload, attempt + 1)
 
     raise RuntimeError(f"API {resp.status_code}: {resp.text[:300]}")
 
 
-async def _try_urls(client: httpx.AsyncClient, model: str, payload: dict) -> bytes:
-    """Try the new HF router first, then the legacy endpoint."""
-    last_err = None
-    for base in [_HF_ROUTER, _HF_LEGACY]:
-        try:
-            return await _call(client, f"{base}/{model}", payload)
-        except RuntimeError as e:
-            last_err = e
-            # 404 = model not on this endpoint; try the other one
-            if "404" not in str(e):
-                raise   # non-404 errors (401, 503 timeout) bubble up immediately
-    raise RuntimeError(str(last_err))
-
-
-async def _img2img(
-    client: httpx.AsyncClient,
-    person_image: bytes,
-    garment: str,
-    color: str,
-    style: str,
-    gender: str,
-) -> bytes:
-    """Inpainting: replaces the clothing area while keeping the person's face identical."""
-    from PIL import Image
-    import io
-    from services.image_processing import create_clothing_mask
-    
-    # 1. Prepare images
-    img = Image.open(io.BytesIO(person_image)).convert("RGB")
-    img = img.resize((512, 512), Image.LANCZOS) # Inpainting works best at 512
-    
-    # 2. Generate mask for clothes (person minus face)
-    mask = create_clothing_mask(img)
-    
-    # 3. Encode to base64
-    def to_b64(pil_img):
-        buf = io.BytesIO()
-        pil_img.save(buf, format="PNG")
-        return base64.b64encode(buf.getvalue()).decode()
-
-    img_b64 = to_b64(img)
-    mask_b64 = to_b64(mask)
-    
-    # 4. Prompt as per user requirements
-    prompt = (
-        f"A high-quality fashion catalog image of a {gender} wearing a {style} {color} {garment}, "
-        f"full body, clean background, realistic lighting, detailed fabric. "
-        f"Same person, same face, wearing the described outfit, preserve identity, realistic."
-    )
-    
-    negative_prompt = (
-        "different face, distorted, unrealistic, extra limbs, "
-        "low quality, facial distortion, face change, blurry"
-    )
-    
-    return await _try_urls(
-        client,
-        _MODEL_IMG2IMG,
-        {
-            "inputs": {
-                "image": img_b64,
-                "mask": mask_b64,
-                "prompt": prompt,
-            },
-            "parameters": {
-                "negative_prompt": negative_prompt,
-                "num_inference_steps": 10,
-                "strength": 1.0, # Complete replacement inside the mask
-                "guidance_scale": 7.5,
-            },
-        },
-    )
+async def _try_api(client: httpx.AsyncClient, model: str, payload: dict) -> bytes:
+    """Call the HF Inference API."""
+    return await _call(client, f"{_HF_API_BASE}/{model}", payload)
 
 
 async def _txt2img(
@@ -181,21 +162,40 @@ async def _txt2img(
     color: str,
     style: str,
 ) -> bytes:
-    """FLUX.1-schnell text-to-image (fallback when img2img unavailable)."""
+    """Generates a fashion portrait using local or API models."""
     prompt = (
         f"Fashion portrait, {skin_tone} skin tone {gender} "
         f"wearing a {garment} in {color}, {style}, "
         f"professional studio photography, clean white background, "
         f"detailed fabric texture, high quality"
     )
-    return await _try_urls(
-        client,
-        _MODEL_TXT2IMG,
-        {
-            "inputs": prompt,
-            "parameters": {"num_inference_steps": 4},
-        },
-    )
+    
+    # 1. Try local SD Turbo first
+    sd_pipeline = _get_sd_turbo()
+    if sd_pipeline:
+        try:
+            import io
+            print(f"[DEBUG] Generating portrait locally with SD Turbo...")
+            image = sd_pipeline(prompt, num_inference_steps=2, guidance_scale=0.0).images[0]
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG")
+            return buf.getvalue()
+        except Exception as e:
+            print(f"[WARNING] Local portrait generation failed: {e}")
+
+    # 2. Fallback to HF API — try primary model, then fallbacks
+    payload = {"inputs": prompt, "parameters": {"num_inference_steps": 4}}
+    models_to_try = [_MODEL_TXT2IMG] + _FALLBACK_MODELS
+    last_err = None
+    for model in models_to_try:
+        try:
+            print(f"[DEBUG] Trying HF API model: {model}...")
+            return await _try_api(client, model, payload)
+        except RuntimeError as e:
+            print(f"[DEBUG] Model {model} failed: {e}")
+            last_err = e
+            continue
+    raise RuntimeError(f"All HF API models failed. Last error: {last_err}")
 
 
 async def _generate_garment_only(
@@ -228,16 +228,19 @@ async def _generate_garment_only(
         except Exception as e:
             print(f"[WARNING] Local garment generation failed, falling back to API: {e}")
 
-    # 2. Fallback to HF API
-    print(f"[DEBUG] Generating garment via HF API for {garment}...")
-    return await _try_urls(
-        client,
-        _MODEL_TXT2IMG,
-        {
-            "inputs": prompt,
-            "parameters": {"num_inference_steps": 4},
-        },
-    )
+    # 2. Fallback to HF API — try primary model, then fallbacks
+    payload = {"inputs": prompt, "parameters": {"num_inference_steps": 4}}
+    models_to_try = [_MODEL_TXT2IMG] + _FALLBACK_MODELS
+    last_err = None
+    for model in models_to_try:
+        try:
+            print(f"[DEBUG] Trying HF API model: {model} for {garment}...")
+            return await _try_api(client, model, payload)
+        except RuntimeError as e:
+            print(f"[DEBUG] Model {model} failed for {garment}: {e}")
+            last_err = e
+            continue
+    raise RuntimeError(f"All HF API models failed for {garment}. Last error: {last_err}")
 
 
 async def _vton_local(
@@ -256,12 +259,13 @@ async def _vton_local(
     person = Image.open(io.BytesIO(person_image)).convert("RGB")
     garment = Image.open(io.BytesIO(garment_image)).convert("RGB")
 
-    # Run try-on
+    # Run try-on (4 steps for CPU speed, 10+ for GPU quality)
+    steps = 4 if not _GPU_AVAILABLE else 10
     result = pipeline(
         person_image=person,
         garment_image=garment,
         category=category,
-        num_timesteps=10
+        num_timesteps=steps
     )
 
     buf = io.BytesIO()
@@ -278,16 +282,16 @@ async def generate_outfit_images(
     style: str,
     num_images: int = 1,
 ) -> List[str]:
-    person_b64 = base64.b64encode(person_image).decode()
     results: List[str] = []
 
     async with httpx.AsyncClient() as client:
         for i in range(min(num_images, 1)):
             garment = garments[i % len(garments)]
             color   = colors[i % len(colors)]
+            image_bytes = None
 
+            # ── Path 1: Try Local VTON Pipeline (High Quality) ──
             try:
-                # 1. Try Local VTON Pipeline (High Quality)
                 pipeline = _get_vton_pipeline()
                 if pipeline:
                     print(f"[DEBUG] Attempting local VTON for {garment}")
@@ -304,14 +308,58 @@ async def generate_outfit_images(
                     
                     # C. Run local VTON
                     image_bytes = await _vton_local(person_image, garment_bytes, category)
-                else:
-                    # 2. Fallback to HF Inpainting
-                    print(f"[DEBUG] Falling back to HF Inpainting for {garment}")
-                    image_bytes = await _img2img(client, person_image, garment, color, style, gender)
-                    
+                    print(f"[DEBUG] ✓ Local VTON succeeded for {garment}")
             except Exception as e:
-                print(f"[DEBUG] Generation failed for {garment}: {e}")
-                continue 
+                print(f"[WARNING] Local VTON failed for {garment}: {e}")
+                image_bytes = None
+
+            # ── Path 2: Try Local Inpainting ──
+            if image_bytes is None:
+                try:
+                    inpaint_pipeline = _get_inpainting_pipeline()
+                    if inpaint_pipeline:
+                        from PIL import Image
+                        import io
+                        from services.image_processing import create_clothing_mask
+                        
+                        print(f"[DEBUG] Attempting local inpainting for {garment}")
+                        img = Image.open(io.BytesIO(person_image)).convert("RGB")
+                        img = img.resize((512, 512), Image.LANCZOS)
+                        mask = create_clothing_mask(img)
+                        
+                        prompt = (
+                            f"A high-quality fashion catalog image of a {gender} wearing a {style} {color} {garment}, "
+                            f"full body, clean background, realistic lighting, detailed fabric. "
+                            f"Same person, same face, wearing the described outfit, preserve identity, realistic."
+                        )
+                        
+                        result = inpaint_pipeline(
+                            prompt=prompt,
+                            image=img,
+                            mask_image=mask,
+                            num_inference_steps=2,
+                            guidance_scale=0.0,
+                        ).images[0]
+                        buf = io.BytesIO()
+                        result.save(buf, format="JPEG")
+                        image_bytes = buf.getvalue()
+                        print(f"[DEBUG] ✓ Local inpainting succeeded for {garment}")
+                except Exception as e:
+                    print(f"[WARNING] Local inpainting failed for {garment}: {e}")
+                    image_bytes = None
+
+            # ── Path 3: FALLBACK — Generate via HF API (FLUX.1-schnell) ──
+            # This is the most reliable path; always available with a valid HF_TOKEN.
+            if image_bytes is None:
+                try:
+                    print(f"[DEBUG] Falling back to HF API text-to-image for {garment}...")
+                    image_bytes = await _txt2img(
+                        client, gender, skin_tone, garment, color, style
+                    )
+                    print(f"[DEBUG] ✓ HF API generation succeeded for {garment}")
+                except Exception as e:
+                    print(f"[ERROR] HF API generation also failed for {garment}: {e}")
+                    continue
 
             b64 = base64.b64encode(image_bytes).decode()
             results.append(f"data:image/jpeg;base64,{b64}")

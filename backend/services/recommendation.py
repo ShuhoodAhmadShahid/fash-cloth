@@ -1,15 +1,56 @@
+import kagglehub
+from kagglehub import KaggleDatasetAdapter
+import pandas as pd
+import random
+
+_DATASET_DF = None
+
+def _get_dataset():
+    global _DATASET_DF
+    if _DATASET_DF is None:
+        try:
+            print("[DEBUG] Loading clothing dataset from Kaggle...")
+            _DATASET_DF = kagglehub.dataset_load(
+                KaggleDatasetAdapter.PANDAS,
+                "agrigorev/clothing-dataset-full",
+                "images.csv",
+            )
+            # Filter out 'Skip', 'Not sure', 'Other'
+            _DATASET_DF = _DATASET_DF[~_DATASET_DF['label'].isin(['Skip', 'Not sure', 'Other'])]
+        except Exception as e:
+            print(f"[WARNING] Failed to load Kaggle dataset: {e}")
+            # Fallback to empty DF so we don't crash
+            _DATASET_DF = pd.DataFrame(columns=['image', 'label', 'kids'])
+    return _DATASET_DF
+
 _COLOR_MAP = {
+    "porcelain": [
+        "icy blue", "silver", "soft lavender", "mint", "cool pink",
+        "charcoal", "navy", "emerald green", "white", "black"
+    ],
+    "fair": [
+        "peach", "soft pink", "baby blue", "mint green", "champagne",
+        "light grey", "lavender", "coral", "ivory", "rose gold"
+    ],
     "light": [
-        "ivory", "soft pink", "lavender", "powder blue", "mint green",
-        "blush rose", "champagne", "light grey", "peach", "sky blue",
+        "sage green", "dusty rose", "beige", "periwinkle", "camel",
+        "olive", "mauve", "powder blue", "teal", "burgundy"
     ],
     "medium": [
-        "olive", "terracotta", "forest green", "rust", "coral",
-        "caramel", "burgundy", "deep teal", "cinnamon", "amber",
+        "olive", "terracotta", "forest green", "rust", "caramel",
+        "deep teal", "mustard", "cinnamon", "amber", "navy"
     ],
-    "dark": [
-        "mustard", "royal blue", "emerald green", "gold", "white",
-        "cobalt", "fuchsia", "deep orange", "wine red", "cream",
+    "tan": [
+        "mustard", "rust", "coral", "deep teal", "warm brown",
+        "burnt orange", "gold", "olive", "turquoise", "cream"
+    ],
+    "deep": [
+        "royal blue", "emerald green", "gold", "burgundy", "plum",
+        "magenta", "deep purple", "silver", "bright white", "yellow"
+    ],
+    "ebony": [
+        "bright white", "cobalt blue", "fuchsia", "canary yellow", "tangerine",
+        "gold", "silver", "cream", "electric lime", "crimson"
     ],
 }
 
@@ -111,8 +152,34 @@ _OCCASION_MAP = {
 
 def get_recommendations(gender: str, skin_tone: str, face_shape: str) -> dict:
     g = gender.lower()
+    df = _get_dataset()
+    
+    # 1. Determine base colors
     colors = _COLOR_MAP.get(skin_tone.lower(), ["navy", "white", "beige", "olive"])
-    garments = _GARMENT_MAP.get(g, _GARMENT_MAP["unknown"])
+    
+    # 2. Get garments from dataset if available, otherwise fallback to map
+    if not df.empty:
+        # Filter for non-kids if possible (dataset has 'kids' column)
+        adult_df = df[df['kids'] == False]
+        if adult_df.empty: adult_df = df
+        
+        # Categorize labels into gender buckets (rough heuristic)
+        male_labels = ['T-Shirt', 'Shirt', 'Pants', 'Outwear', 'Polo', 'Hoodie', 'Blazer']
+        female_labels = ['T-Shirt', 'Shirt', 'Pants', 'Skirt', 'Top', 'Outwear', 'Dress', 'Blouse', 'Hoodie', 'Blazer']
+        
+        target_labels = male_labels if g == "male" else female_labels
+        
+        # Get matching items
+        matching_items = adult_df[adult_df['label'].isin(target_labels)]
+        if not matching_items.empty:
+            # Pick a diverse set of 10 items
+            sample_size = min(len(matching_items), 10)
+            garments = matching_items.sample(sample_size)['label'].str.lower().unique().tolist()
+        else:
+            garments = _GARMENT_MAP.get(g, _GARMENT_MAP["unknown"])
+    else:
+        garments = _GARMENT_MAP.get(g, _GARMENT_MAP["unknown"])
+
     style_info = _STYLE_MAP.get(face_shape.lower(), _STYLE_MAP["oval"])
     accessories = _ACCESSORY_MAP.get(g, _ACCESSORY_MAP["unknown"])
 
